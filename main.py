@@ -39,6 +39,7 @@ def main(file_path, time1, time2):
     out1.to_csv('filtered_data1.csv', index=False)
     out2.to_csv('filtered_data2.csv', index=False)
     print("第一個時間段",num_of_comment1, num_of_comment1/days1)
+    print("第二個時間段",num_of_comment2, num_of_comment2/days2)
 
 if __name__ == "__main__":
     file_path = 'PTCG_Pocket.csv'
