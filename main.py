@@ -42,24 +42,6 @@ def filter_data(df, times):
 sentiment_pipeline = pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment")
 tokenizer = AutoTokenizer.from_pretrained("cardiffnlp/twitter-roberta-base-sentiment")
 
-def keywords(comments):
-    '''提取關鍵字'''
-    extractor = KeywordExtractor(lan="en", n=3, dedupLim=0.5, top=5)
-    all_keywords = []
-    for text in comments:
-        extracted = extractor.extract_keywords(text)
-        all_keywords.extend(extracted)  # 合併所有評論的關鍵字
-
-    # 將關鍵字按照分數排序（分數越低越重要）
-    sorted_keywords = sorted(all_keywords, key=lambda x: x[1])  # x[1] 是分數
-
-    # 去重並保留最重要的關鍵字
-    unique_keywords = {}
-    for kw, score in sorted_keywords:
-        if kw not in unique_keywords:
-            unique_keywords[kw] = score
-    return sorted(unique_keywords.items(), key=lambda x: x[1])[:5]
-
 def topic_modeling(comments):
     '''進行話題建模'''
     topic_model = BERTopic()
@@ -89,7 +71,6 @@ def sentiment_percentage(labels):
     return pd.Series(labels).value_counts(normalize=True) * 100
 
 def trends(data, num_of_comment):
-    keyword = keywords(data['Combined'])
     topic = topic_modeling(data['Combined'])
     sentiments = analyze_sentiment(data)
     sentiment_counts = {
@@ -100,7 +81,6 @@ def trends(data, num_of_comment):
     return {
         "total_reviews": num_of_comment,
         "sentiment_counts": sentiment_counts,
-        "keywords": keyword,
         "topics": topic
     }
 
@@ -130,7 +110,7 @@ def main(file_path, time1, time2):
     trends1 = trends(df1, num_of_comment1)
     trends2 = trends(df2, num_of_comment2)
 
-    #comparison(sent1, sent2, str(time1), str(time2))
+    comparison(trends1["sentiment_counts"], trends2["sentiment_counts"], str(time1), str(time2))
 
     print("第一個時間段",trends1, num_of_comment1/days1)
     print("第二個時間段",trends2, num_of_comment2/days2)
