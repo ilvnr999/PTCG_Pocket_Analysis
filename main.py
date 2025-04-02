@@ -1,6 +1,9 @@
 import pandas as pd
 from datetime import datetime 
-from transformers import pipeline
+from transformers import pipeline, AutoTokenizer
+from bertopic import BERTopic
+from sklearn.feature_extraction.text import TfidfVectorizer
+from yake import KeywordExtractor
 import matplotlib.pyplot as plt
 
 def read_data(file_path, times):
@@ -31,13 +34,49 @@ def filter_data(df, times):
     start_date_obj = datetime.strptime(start_date, "%Y-%m-%d")
     end_date_obj = datetime.strptime(end_date, "%Y-%m-%d")
     days = (end_date_obj - start_date_obj).days
+    if mask.sum() == 0:
+        print("沒有符合條件的評論")
+        return df, 0, 0
     return df.loc[mask], mask.sum(), days+1
 
 sentiment_pipeline = pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment")
+tokenizer = AutoTokenizer.from_pretrained("cardiffnlp/twitter-roberta-base-sentiment")
 
-def analyze_sentiment(comments):
+def keywords(comments):
+    '''提取關鍵字'''
+    extractor = KeywordExtractor(lan="en", n=3, dedupLim=0.5, top=5)
+    all_keywords = []
+    for text in comments:
+        extracted = extractor.extract_keywords(text)
+        all_keywords.extend(extracted)  # 合併所有評論的關鍵字
+
+    # 將關鍵字按照分數排序（分數越低越重要）
+    sorted_keywords = sorted(all_keywords, key=lambda x: x[1])  # x[1] 是分數
+
+    # 去重並保留最重要的關鍵字
+    unique_keywords = {}
+    for kw, score in sorted_keywords:
+        if kw not in unique_keywords:
+            unique_keywords[kw] = score
+    return sorted(unique_keywords.items(), key=lambda x: x[1])[:5]
+
+def topic_modeling(comments):
+    '''進行話題建模'''
+    topic_model = BERTopic()
+    topic, _ = topic_model.fit_transform(comments)
+    topic_info = topic_model.get_topic_info()
+    filtered_topics = topic_info[topic_info['Topic'] != -1].head(5)
+    simplified_topics = filtered_topics[['Name', 'Count']].to_dict(orient='records')
+    return simplified_topics
+
+def analyze_sentiment(data):
     '''進行情感分析'''
-    results = sentiment_pipeline(comments.tolist())
+    data['Combined'] = data['Title'].fillna('') + data['Content'].fillna('')
+    truncated_texts = [
+        tokenizer.decode(tokenizer(text, max_length=512, truncation=True)['input_ids'])
+        for text in data['Combined']
+    ]
+    results = sentiment_pipeline(truncated_texts)
     mapping = {
         'LABEL_0': 'Negative',
         'LABEL_1': 'Neutral',
@@ -49,12 +88,28 @@ def sentiment_percentage(labels):
     '''計算情感比例'''
     return pd.Series(labels).value_counts(normalize=True) * 100
 
+def trends(data, num_of_comment):
+    keyword = keywords(data['Combined'])
+    topic = topic_modeling(data['Combined'])
+    sentiments = analyze_sentiment(data)
+    sentiment_counts = {
+        "positive": sentiments.count("Positive"),
+        "negative": sentiments.count("Negative"),
+        "neutral": sentiments.count("Neutral")  # RoBERTa 的標籤直接有 "neutral"
+    }
+    return {
+        "total_reviews": num_of_comment,
+        "sentiment_counts": sentiment_counts,
+        "keywords": keyword,
+        "topics": topic
+    }
+
 def comparison(dist1, dist2, period1, period2):
     '''視覺化情感比較'''
     df = pd.DataFrame({period1: dist1, period2: dist2}).fillna(0)
     df.plot(kind='bar', figsize=(8, 5), colormap='coolwarm')
     plt.title("Sentiment Comparison")
-    plt.ylabel("Percentage")
+    plt.ylabel("comments")
     plt.show()
 
 def main(file_path, time1, time2):
@@ -63,22 +118,22 @@ def main(file_path, time1, time2):
     df1,  num_of_comment1, days1= filter_data(df, time1)
     df2,  num_of_comment2, days2= filter_data(df, time2)
 
-    df1['Combined'] = df1['Title'] + df1['Content']
-    df2['Combined'] = df2['Title'] + df2['Content']
-
-    df1['Sentiment'] = analyze_sentiment(df1['Combined'])
-    df2['Sentiment'] = analyze_sentiment(df2['Combined'])
+    df1['Sentiment'] = analyze_sentiment(df1)
+    df2['Sentiment'] = analyze_sentiment(df2)
 
     df1.to_csv('filtered_data1.csv', index=False)
     df2.to_csv('filtered_data2.csv', index=False)
 
-    sent1 = sentiment_percentage(df1['Sentiment'])
-    sent2 = sentiment_percentage(df2['Sentiment'])
+    #sent1 = sentiment_percentage(df1['Sentiment'])
+    #sent2 = sentiment_percentage(df2['Sentiment'])
 
-    comparison(sent1, sent2, str(time1), str(time2))
+    trends1 = trends(df1, num_of_comment1)
+    trends2 = trends(df2, num_of_comment2)
 
-    print("第一個時間段",num_of_comment1, num_of_comment1/days1)
-    print("第二個時間段",num_of_comment2, num_of_comment2/days2)
+    #comparison(sent1, sent2, str(time1), str(time2))
+
+    print("第一個時間段",trends1, num_of_comment1/days1)
+    print("第二個時間段",trends2, num_of_comment2/days2)
 
 if __name__ == "__main__":
     file_path = 'PTCG_Pocket.csv'
