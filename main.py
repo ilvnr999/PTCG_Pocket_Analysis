@@ -1,5 +1,7 @@
 import pandas as pd
 from datetime import datetime 
+from transformers import pipeline
+import matplotlib.pyplot as plt
 
 def read_data(file_path, times):
     '''讀取資料，並轉換日期格式'''
@@ -31,13 +33,50 @@ def filter_data(df, times):
     days = (end_date_obj - start_date_obj).days
     return df.loc[mask], mask.sum(), days+1
 
+sentiment_pipeline = pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment")
+
+def analyze_sentiment(comments):
+    '''進行情感分析'''
+    results = sentiment_pipeline(comments.tolist())
+    mapping = {
+        'LABEL_0': 'Negative',
+        'LABEL_1': 'Neutral',
+        'LABEL_2': 'Positive'
+    }
+    return [mapping[res['label']] for res in results]
+
+def sentiment_percentage(labels):
+    '''計算情感比例'''
+    return pd.Series(labels).value_counts(normalize=True) * 100
+
+def comparison(dist1, dist2, period1, period2):
+    '''視覺化情感比較'''
+    df = pd.DataFrame({period1: dist1, period2: dist2}).fillna(0)
+    df.plot(kind='bar', figsize=(8, 5), colormap='coolwarm')
+    plt.title("Sentiment Comparison")
+    plt.ylabel("Percentage")
+    plt.show()
+
 def main(file_path, time1, time2):
     df = read_data(file_path, time1)
     
-    out1,  num_of_comment1, days1= filter_data(df, time1)
-    out2,  num_of_comment2, days2= filter_data(df, time2)
-    out1.to_csv('filtered_data1.csv', index=False)
-    out2.to_csv('filtered_data2.csv', index=False)
+    df1,  num_of_comment1, days1= filter_data(df, time1)
+    df2,  num_of_comment2, days2= filter_data(df, time2)
+
+    df1['Combined'] = df1['Title'] + df1['Content']
+    df2['Combined'] = df2['Title'] + df2['Content']
+
+    df1['Sentiment'] = analyze_sentiment(df1['Combined'])
+    df2['Sentiment'] = analyze_sentiment(df2['Combined'])
+
+    df1.to_csv('filtered_data1.csv', index=False)
+    df2.to_csv('filtered_data2.csv', index=False)
+
+    sent1 = sentiment_percentage(df1['Sentiment'])
+    sent2 = sentiment_percentage(df2['Sentiment'])
+
+    comparison(sent1, sent2, str(time1), str(time2))
+
     print("第一個時間段",num_of_comment1, num_of_comment1/days1)
     print("第二個時間段",num_of_comment2, num_of_comment2/days2)
 
