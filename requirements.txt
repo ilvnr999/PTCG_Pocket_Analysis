@@ -6,3 +6,4 @@ transformers==4.50.3
 yake==0.4.8
 uvicorn==0.34.0
 torch==2.6.0
+python-multipart==0.0.20

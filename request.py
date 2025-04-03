@@ -4,6 +4,11 @@ import base64
 # API 的 URL
 url = "http://127.0.0.1:8000/analyze"
 
+# 從終端機輸入兩個時間範圍
+time1 = input("請輸入第一個時間範圍 (格式：YYYY-MM-DD,YYYY-MM-DD)：")
+time2 = input("請輸入第二個時間範圍 (格式：YYYY-MM-DD,YYYY-MM-DD)：")
+print("會因所選時間範圍長短而影響處理時間，請耐心等候")
+
 # 上傳的檔案和表單數據
 files = {'file': open('filtered_data.csv', 'rb')}  # 確保檔案路徑正確
 data = {
@@ -17,7 +22,11 @@ response = requests.post(url, files=files, data=data)
 # 處理回應
 if response.status_code == 200:
     result = response.json()
-    print("Top Keywords:", result["top_keywords"])
+    print("可能導致兩時間評論有別的關鍵字：/n")
+    for key, value in result['top_keywords']:
+        print(f"字詞:{key}  差異次數:{value}")
+    
+
 
     # 將 Base64 圖像解碼並保存為 PNG 文件
     image_base64 = result["image"]
