@@ -5,7 +5,7 @@ import base64
 url = "http://127.0.0.1:8000/analyze"
 
 # 上傳的檔案和表單數據
-files = {'file': open('PTCG_Pocket.csv', 'rb')}  # 確保檔案路徑正確
+files = {'file': open('filtered_data.csv', 'rb')}  # 確保檔案路徑正確
 data = {
     'time1': '2025-01-01,2025-01-02',  # 第一個時間範圍
     'time2': '2025-02-01,2025-02-02'   # 第二個時間範圍
