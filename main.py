@@ -1,17 +1,14 @@
 import pandas as pd
 from datetime import datetime 
 from transformers import pipeline, AutoTokenizer
-from bertopic import BERTopic
-from sklearn.feature_extraction.text import TfidfVectorizer
 from yake import KeywordExtractor
+from collections import Counter
 import matplotlib.pyplot as plt
-from wordcloud import WordCloud
 
 def read_data(file_path):
     '''讀取資料，並轉換日期格式'''
     df = pd.read_csv(file_path, encoding='utf-8', parse_dates=["Date"])
     return df
-
 
 def format_date(date_str):
     '''將輸入的日期轉換為固定格式 YYYY-MM-DD'''
@@ -37,24 +34,37 @@ def filter_data(df, times):
     days = (end_date_obj - start_date_obj).days
     if mask.sum() == 0:
         print("沒有符合條件的評論")
-        return df, 0, 0
+        return 0
     return df.loc[mask], mask.sum(), days+1
 
 sentiment_pipeline = pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment")
 tokenizer = AutoTokenizer.from_pretrained("cardiffnlp/twitter-roberta-base-sentiment")
 
-def topic_modeling(comments):
-    '''進行話題建模'''
-    topic_model = BERTopic()
-    topic, _ = topic_model.fit_transform(comments)
-    topic_info = topic_model.get_topic_info()
-    filtered_topics = topic_info[topic_info['Topic'] != -1].head(5)
-    simplified_topics = filtered_topics[['Name', 'Count']].to_dict(orient='records')
-    return simplified_topics
+def extract_keywords_yake(comments, top_n=100):
+    '''使用 YAKE 提取關鍵字'''
+    extractor = KeywordExtractor(lan="en", n=3, dedupLim=0.9, top=top_n)
+    all_keywords = []
+    for comment in comments:
+        keywords = extractor.extract_keywords(comment.lower())
+        all_keywords.extend([kw[0] for kw in keywords])  # 提取關鍵字
+    return Counter(all_keywords)  # 返回關鍵字的頻率
+
+def compare_keyword_frequencies(freq1, freq2):
+    '''比較兩個時段的關鍵字頻率變化'''
+    all_keywords = set(freq1.keys()).union(set(freq2.keys()))
+    comparison = []
+    for keyword in all_keywords:
+        freq_period1 = freq1.get(keyword, 0)
+        freq_period2 = freq2.get(keyword, 0)
+        change = freq_period2 - freq_period1
+        comparison.append((keyword, change))
+    # 按變化量排序
+    comparison.sort(key=lambda x: x[1], reverse=True)
+    return comparison
 
 def analyze_sentiment(data):
     '''進行情感分析'''
-    data['Combined'] = data['Title'].fillna('') + data['Content'].fillna('')
+    data.loc[:, 'Combined'] = data['Title'].fillna('') + data['Content'].fillna('')
     truncated_texts = [
         tokenizer.decode(tokenizer(text, max_length=512, truncation=True)['input_ids'])
         for text in data['Combined']
@@ -67,12 +77,8 @@ def analyze_sentiment(data):
     }
     return [mapping[res['label']] for res in results]
 
-def sentiment_percentage(labels):
-    '''計算情感比例'''
-    return pd.Series(labels).value_counts(normalize=True) * 100
 
 def trends(data, num_of_comment):
-    topic = topic_modeling(data['Combined'])
     sentiments = analyze_sentiment(data)
     sentiment_counts = {
         "positive": sentiments.count("Positive"),
@@ -82,82 +88,68 @@ def trends(data, num_of_comment):
     return {
         "total_reviews": num_of_comment,
         "sentiment_counts": sentiment_counts,
-        "topics": topic
     }
 
-def visualize_topics(topics):
-    '''視覺化話題建模結果'''
-    # 使用柱狀圖展示話題的出現次數
-    topic_names = [topic['Name'] for topic in topics]
-    topic_counts = [topic['Count'] for topic in topics]
-    
-    plt.figure(figsize=(10, 6))
-    plt.barh(topic_names, topic_counts, color='skyblue')
-    plt.xlabel('Count')
-    plt.ylabel('Topics')
-    plt.title('Top Topics by Frequency')
-    plt.gca().invert_yaxis()  # 反轉 y 軸，讓最高頻的話題在最上方
-    plt.show()
+def visualize_combined(trends1, trends2, num_of_comment1, days1, num_of_comment2, days2, period1, period2):
+    '''將評論數量、情感分佈和成長趨勢合併到一個畫布中'''
+    # 計算平均每天的評論數
+    avg_comments1 = num_of_comment1 / days1
+    avg_comments2 = num_of_comment2 / days2
 
-    # 使用詞雲展示話題的關鍵詞
-    wordcloud_text = " ".join(topic['Name'] for topic in topics)
-    wordcloud = WordCloud(width=800, height=400, background_color='white').generate(wordcloud_text)
-    
-    plt.figure(figsize=(10, 6))
-    plt.imshow(wordcloud, interpolation='bilinear')
-    plt.axis('off')
-    plt.title('Topic Keywords WordCloud')
-    plt.show()
+    # 計算成長量
+    avg_daily_negative1 = trends1['sentiment_counts']['negative'] / days1
+    avg_daily_negative2 = trends2['sentiment_counts']['negative'] / days2
+    total_growth = avg_comments2 - avg_comments1
+    negative_growth = avg_daily_negative2 - avg_daily_negative1
 
-def visualize_sentiments(sentiment_counts, period_name):
-    '''視覺化情感分析結果'''
-    labels = sentiment_counts.keys()
-    sizes = sentiment_counts.values()
-    colors = ['#ff9999', '#66b3ff', '#99ff99']  # 自定義顏色
+    # 創建子圖
+    fig, axes = plt.subplots(1, 3, figsize=(10, 14) , dpi=100) 
+    fig.suptitle('Comment Analysis and Trends', fontsize=16)
+    fig.subplots_adjust(hspace=0.4, wspace=0.4)
 
-    plt.figure(figsize=(8, 6))
-    plt.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=140, colors=colors)
-    plt.title(f'Sentiment Distribution for {period_name}')
-    plt.axis('equal')  # 保持圓形
-    plt.show()    
+    # 子圖 1: 評論數量及平均每天的評論數（長條圖）
+    df_comments = pd.DataFrame({
+        'Metric': ['Total Comments', 'Average Daily Comments'],
+        period1: [num_of_comment1, avg_comments1],
+        period2: [num_of_comment2, avg_comments2]
+    })
+    df_comments.set_index('Metric', inplace=True)
+    df_comments.plot(kind='bar', ax=axes[0], colormap='viridis')
+    axes[0].set_title('Comment Trends Between Two Periods')
+    axes[0].set_xlabel('Metric')
+    axes[0].set_ylabel('Number of Comments')
+    axes[0].legend(title='Period')
+    axes[0].grid(axis='y')
 
-def visualize_trends(trends1, trends2, period1, period2):
-    '''比較兩個時間段的情感分佈和話題趨勢'''
-    # 情感分佈比較
+    # 子圖 2: 情感分佈比較（長條圖）
     df_sentiments = pd.DataFrame({
-        period1: trends1['sentiment_counts'],
-        period2: trends2['sentiment_counts']
-    }).fillna(0)
+        'Sentiment': ['Positive', 'Negative', 'Neutral'],
+        period1: [trends1['sentiment_counts']['positive'], trends1['sentiment_counts']['negative'], trends1['sentiment_counts']['neutral']],
+        period2: [trends2['sentiment_counts']['positive'], trends2['sentiment_counts']['negative'], trends2['sentiment_counts']['neutral']]
+    })
+    df_sentiments.set_index('Sentiment', inplace=True)
+    df_sentiments.plot(kind='bar', ax=axes[1], colormap='coolwarm')
+    axes[1].set_title('Sentiment Comparison Between Two Periods')
+    axes[1].set_ylabel('Number of Comments')
+    axes[1].set_xlabel('Sentiment')
+    axes[1].grid(axis='y')
 
-    df_sentiments.plot(kind='bar', figsize=(10, 6), colormap='coolwarm')
-    plt.title('Sentiment Comparison Between Periods')
-    plt.ylabel('Number of Comments')
-    plt.xlabel('Sentiment')
-    plt.xticks(rotation=0)
+    # 子圖 3: 成長量比較（長條圖）
+    growth_data = {
+        'Metric': ['Total Growth', 'Negative Growth'],
+        'Growth': [total_growth, negative_growth]
+    }
+    df_growth = pd.DataFrame(growth_data)
+    axes[2].bar(df_growth['Metric'], df_growth['Growth'], color=['orange', 'red'])
+    axes[2].set_title('Growth in Comments and Negative Comments')
+    axes[2].set_ylabel('Growth per Day')
+    axes[2].grid(axis='y')
+
+    # 調整子圖間距
+    plt.tight_layout()
     plt.show()
 
-    # 話題頻率比較
-    topics1 = {topic['Name']: topic['Count'] for topic in trends1['topics']}
-    topics2 = {topic['Name']: topic['Count'] for topic in trends2['topics']}
-    df_topics = pd.DataFrame({
-        period1: topics1,
-        period2: topics2
-    }).fillna(0)
 
-    df_topics.plot(kind='bar', figsize=(10, 6), colormap='viridis')
-    plt.title('Topic Frequency Comparison Between Periods')
-    plt.ylabel('Frequency')
-    plt.xlabel('Topics')
-    plt.xticks(rotation=45, ha='right')
-    plt.show()
-
-def comparison(dist1, dist2, period1, period2):
-    '''視覺化情感比較'''
-    df = pd.DataFrame({period1: dist1, period2: dist2}).fillna(0)
-    df.plot(kind='bar', figsize=(8, 5), colormap='coolwarm')
-    plt.title("Sentiment Comparison")
-    plt.ylabel("comments")
-    plt.show()
 
 def main(file_path, time1, time2):
     df = read_data(file_path)
@@ -171,21 +163,25 @@ def main(file_path, time1, time2):
     df1.to_csv('filtered_data1.csv', index=False)
     df2.to_csv('filtered_data2.csv', index=False)
 
+    keywords_freq1 = extract_keywords_yake(df1['Combined'].tolist(), top_n=20)
+    keywords_freq2 = extract_keywords_yake(df2['Combined'].tolist(), top_n=20)
+
+    # 比較關鍵字頻率變化
+    keyword_comparison = compare_keyword_frequencies(keywords_freq1, keywords_freq2)
+
+    # 輸出結果
+    print("關鍵字頻率變化：")
+    print(f"{'Keyword':<20}{'Change':<10}")
+    for keyword, change in keyword_comparison[:5]:  # 顯示前 10 個變化最大的關鍵字
+        print(f"{keyword:<20}{change:<10}")
+
     trends1 = trends(df1, num_of_comment1)
     trends2 = trends(df2, num_of_comment2)
 
-    visualize_topics(trends1['topics'])
-    visualize_topics(trends2['topics'])
+    visualize_combined(trends1, trends2, num_of_comment1, days1, num_of_comment2, days2, time1, time2)
 
-    # 視覺化情感分析結果
-    visualize_sentiments(trends1['sentiment_counts'], "第一個時間段")
-    visualize_sentiments(trends2['sentiment_counts'], "第二個時間段")
-
-
-    comparison(trends1["sentiment_counts"], trends2["sentiment_counts"], str(time1), str(time2))
-
-    print("第一個時間段",trends1, num_of_comment1/days1)
-    print("第二個時間段",trends2, num_of_comment2/days2)
+    #print("第一個時間段",trends1, num_of_comment1/days1)
+    #print("第二個時間段",trends2, num_of_comment2/days2)
 
 if __name__ == "__main__":
     file_path = 'PTCG_Pocket.csv'
