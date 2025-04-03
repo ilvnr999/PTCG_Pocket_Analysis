@@ -5,8 +5,9 @@ from bertopic import BERTopic
 from sklearn.feature_extraction.text import TfidfVectorizer
 from yake import KeywordExtractor
 import matplotlib.pyplot as plt
+from wordcloud import WordCloud
 
-def read_data(file_path, times):
+def read_data(file_path):
     '''讀取資料，並轉換日期格式'''
     df = pd.read_csv(file_path, encoding='utf-8', parse_dates=["Date"])
     return df
@@ -84,6 +85,72 @@ def trends(data, num_of_comment):
         "topics": topic
     }
 
+def visualize_topics(topics):
+    '''視覺化話題建模結果'''
+    # 使用柱狀圖展示話題的出現次數
+    topic_names = [topic['Name'] for topic in topics]
+    topic_counts = [topic['Count'] for topic in topics]
+    
+    plt.figure(figsize=(10, 6))
+    plt.barh(topic_names, topic_counts, color='skyblue')
+    plt.xlabel('Count')
+    plt.ylabel('Topics')
+    plt.title('Top Topics by Frequency')
+    plt.gca().invert_yaxis()  # 反轉 y 軸，讓最高頻的話題在最上方
+    plt.show()
+
+    # 使用詞雲展示話題的關鍵詞
+    wordcloud_text = " ".join(topic['Name'] for topic in topics)
+    wordcloud = WordCloud(width=800, height=400, background_color='white').generate(wordcloud_text)
+    
+    plt.figure(figsize=(10, 6))
+    plt.imshow(wordcloud, interpolation='bilinear')
+    plt.axis('off')
+    plt.title('Topic Keywords WordCloud')
+    plt.show()
+
+def visualize_sentiments(sentiment_counts, period_name):
+    '''視覺化情感分析結果'''
+    labels = sentiment_counts.keys()
+    sizes = sentiment_counts.values()
+    colors = ['#ff9999', '#66b3ff', '#99ff99']  # 自定義顏色
+
+    plt.figure(figsize=(8, 6))
+    plt.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=140, colors=colors)
+    plt.title(f'Sentiment Distribution for {period_name}')
+    plt.axis('equal')  # 保持圓形
+    plt.show()    
+
+def visualize_trends(trends1, trends2, period1, period2):
+    '''比較兩個時間段的情感分佈和話題趨勢'''
+    # 情感分佈比較
+    df_sentiments = pd.DataFrame({
+        period1: trends1['sentiment_counts'],
+        period2: trends2['sentiment_counts']
+    }).fillna(0)
+
+    df_sentiments.plot(kind='bar', figsize=(10, 6), colormap='coolwarm')
+    plt.title('Sentiment Comparison Between Periods')
+    plt.ylabel('Number of Comments')
+    plt.xlabel('Sentiment')
+    plt.xticks(rotation=0)
+    plt.show()
+
+    # 話題頻率比較
+    topics1 = {topic['Name']: topic['Count'] for topic in trends1['topics']}
+    topics2 = {topic['Name']: topic['Count'] for topic in trends2['topics']}
+    df_topics = pd.DataFrame({
+        period1: topics1,
+        period2: topics2
+    }).fillna(0)
+
+    df_topics.plot(kind='bar', figsize=(10, 6), colormap='viridis')
+    plt.title('Topic Frequency Comparison Between Periods')
+    plt.ylabel('Frequency')
+    plt.xlabel('Topics')
+    plt.xticks(rotation=45, ha='right')
+    plt.show()
+
 def comparison(dist1, dist2, period1, period2):
     '''視覺化情感比較'''
     df = pd.DataFrame({period1: dist1, period2: dist2}).fillna(0)
@@ -93,7 +160,7 @@ def comparison(dist1, dist2, period1, period2):
     plt.show()
 
 def main(file_path, time1, time2):
-    df = read_data(file_path, time1)
+    df = read_data(file_path)
     
     df1,  num_of_comment1, days1= filter_data(df, time1)
     df2,  num_of_comment2, days2= filter_data(df, time2)
@@ -104,11 +171,16 @@ def main(file_path, time1, time2):
     df1.to_csv('filtered_data1.csv', index=False)
     df2.to_csv('filtered_data2.csv', index=False)
 
-    #sent1 = sentiment_percentage(df1['Sentiment'])
-    #sent2 = sentiment_percentage(df2['Sentiment'])
-
     trends1 = trends(df1, num_of_comment1)
     trends2 = trends(df2, num_of_comment2)
+
+    visualize_topics(trends1['topics'])
+    visualize_topics(trends2['topics'])
+
+    # 視覺化情感分析結果
+    visualize_sentiments(trends1['sentiment_counts'], "第一個時間段")
+    visualize_sentiments(trends2['sentiment_counts'], "第二個時間段")
+
 
     comparison(trends1["sentiment_counts"], trends2["sentiment_counts"], str(time1), str(time2))
 
