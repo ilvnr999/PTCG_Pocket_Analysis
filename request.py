@@ -22,7 +22,7 @@ response = requests.post(url, files=files, data=data)
 # 處理回應
 if response.status_code == 200:
     result = response.json()
-    print("可能導致兩時間評論有別的關鍵字：/n")
+    print("可能導致兩時間評論有別的關鍵字：")
     for key, value in result['top_keywords']:
         print(f"字詞:{key}  差異次數:{value}")
     
