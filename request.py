@@ -2,7 +2,8 @@ import requests
 import base64
 
 # API 的 URL
-url = "http://127.0.0.1:8000/analyze"
+ip = input("請輸入IP位址")
+url = f"http://{ip}:8000/analyze"
 
 # 從終端機輸入兩個時間範圍
 time1 = input("請輸入第一個時間範圍 (格式：YYYY-MM-DD,YYYY-MM-DD)：")

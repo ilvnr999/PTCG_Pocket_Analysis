@@ -9,25 +9,35 @@ import matplotlib.pyplot as plt
 import io
 import base64
 
+# 建立api實例
 app = FastAPI()
 
 # 初始化情感分析模型
 sentiment_pipeline = pipeline("sentiment-analysis", model="cardiffnlp/twitter-roberta-base-sentiment")
+# 初始化分詞器
 tokenizer = AutoTokenizer.from_pretrained("cardiffnlp/twitter-roberta-base-sentiment")
 
 
 def read_data(file: UploadFile):
     try:
-        df = pd.read_csv(file.file, encoding='utf-8', parse_dates=["Date"])
+        df = pd.read_csv(file.file, encoding='utf-8', parse_dates=["Date"]) # utf-8編碼默認的寫法
         return df
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"檔案讀取失敗：{str(e)}")
+        raise HTTPException(status_code=400, detail=f"檔案讀取失敗：{str(e)}")  # 防止服務器中斷，出錯時也比較清楚錯誤處在哪裡
 
 
 def format_date(date_str):
     try:
-        if len(date_str) == 8 and date_str.isdigit():
+        if len(date_str) == 8 and date_str.isdigit():   # 判斷輸入寫法是不是8位數字yyyyMMdd
             return datetime.strptime(date_str, "%Y%m%d").strftime("%Y-%m-%d")
+        else:
+            # 判斷輸入寫法是不是yyyy-MM-dd
+            if len(date_str) == 10 and date_str[4] == '-' and date_str[7] == '-':
+                return datetime.strptime(date_str.strip(), "%Y-%m-%d").strftime("%Y-%m-%d")
+            else:
+                # 判斷輸入寫法是不是yyyy/MM/dd
+                if len(date_str) == 10 and date_str[4] == '/' and date_str[7] == '/':
+                    return datetime.strptime(date_str.strip(), "%Y/%m/%d").strftime("%Y-%m-%d")
         return datetime.strptime(date_str.strip(), "%Y-%m-%d").strftime("%Y-%m-%d")
     except ValueError:
         raise HTTPException(status_code=400, detail=f"日期格式錯誤：{date_str}，請使用 YYYY-MM-DD 或 8 位數字格式")
@@ -35,10 +45,10 @@ def format_date(date_str):
 
 def filter_data(df, times):
     try:
-        start_date, end_date = map(format_date, times.split(','))
+        start_date, end_date = map(format_date, times.split(',')) # 這裡的times是用逗號分隔的兩個時間範圍
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    mask = (df['Date'] >= start_date) & (df['Date'] <= end_date)
+    mask = (df['Date'] >= start_date) & (df['Date'] <= end_date)    # 透過pandas series的布林值來篩選資料
     start_date_obj = datetime.strptime(start_date, "%Y-%m-%d")
     end_date_obj = datetime.strptime(end_date, "%Y-%m-%d")
     days = (end_date_obj - start_date_obj).days
@@ -51,27 +61,27 @@ def extract_keywords_yake(comments, top_n=10):
     extractor = KeywordExtractor(lan="en", n=3, dedupLim=0.9, top=top_n)
     all_keywords = []
     for comment in comments:
-        keywords = extractor.extract_keywords(comment.lower())
-        all_keywords.extend([kw[0] for kw in keywords])
-    return Counter(all_keywords)
+        keywords = extractor.extract_keywords(comment.lower()) # [('sample', 0.1), ('comment', 0.2), ('this', 0.3)]
+        all_keywords.extend([kw[0] for kw in keywords]) # 提取關鍵字
+    return Counter(all_keywords) # 計算關鍵字的頻率回傳字典
 
 
 def compare_keyword_frequencies(freq1, freq2):
-    all_keywords = set(freq1.keys()).union(set(freq2.keys()))
+    all_keywords = set(freq1.keys()).union(set(freq2.keys())) # 取得兩個字典的key的聯集
     comparison = []
     for keyword in all_keywords:
-        freq_period1 = freq1.get(keyword, 0)
+        freq_period1 = freq1.get(keyword, 0) # 取得該字詞的出現頻率沒有則為0
         freq_period2 = freq2.get(keyword, 0)
         change = freq_period2 - freq_period1
-        comparison.append((keyword, change))
-    comparison.sort(key=lambda x: x[1], reverse=True)
+        comparison.append((keyword, change)) # 將字詞和變化量加入列表
+    comparison.sort(key=lambda x: x[1], reverse=True) # 依照key排序 差異數大到小
     return comparison
 
 
 def analyze_sentiment(data):
-    data.loc[:, 'Combined'] = data['Title'].fillna('') + data['Content'].fillna('')
+    data['Combined'] = data['Title'].fillna('') + data['Content'].fillna('')
     truncated_texts = [
-        tokenizer.decode(tokenizer(text, max_length=512, truncation=True)['input_ids'])
+        tokenizer.decode(tokenizer(text, max_length=512, truncation=True)['input_ids']) # 先透過tokenizer辨識哪個為重要的文字 透過decoder還原回文字縮減到512個token
         for text in data['Combined']
     ]
     results = sentiment_pipeline(truncated_texts)
@@ -80,7 +90,7 @@ def analyze_sentiment(data):
         'LABEL_1': 'Neutral',
         'LABEL_2': 'Positive'
     }
-    return [mapping[res['label']] for res in results]
+    return [mapping[res['label']] for res in results] # 將LABEL_0、LABEL_1、LABEL_2轉換為Negative、Neutral、Positive
 
 def trends(data, num_of_comment):
     sentiments = analyze_sentiment(data)
@@ -153,19 +163,19 @@ def visualize_combined(trends1, trends2, num_of_comment1, days1, num_of_comment2
 
     # 調整子圖間距
     plt.tight_layout()
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png')
-    buf.seek(0)
-    base64_image = base64.b64encode(buf.read()).decode('utf-8')
+    buf = io.BytesIO() # 創建一個BytesIO對象
+    fig.savefig(buf, format='png') # 將圖像保存到BytesIO對象中
+    buf.seek(0) 
+    base64_image = base64.b64encode(buf.read()).decode('utf-8') # 將圖像轉換為Base64編碼
     buf.close()
     return base64_image
 
 
-@app.post("/analyze")
-async def analyze(
-    file: UploadFile = File(...),
-    time1: str = Form(...),
-    time2: str = Form(...)
+@app.post("/analyze") # 定義API的路由
+async def analyze(  # 定義API的請求參數
+    file: UploadFile = File(...), # 取得上傳的檔案
+    time1: str = Form(...), # 取得第一個時間範圍
+    time2: str = Form(...) # 取得第二個時間範圍
 ):
     # 讀取檔案
     df = read_data(file)

@@ -61,10 +61,16 @@ python standardization.py
 ### 4. 啟動 API 服務
 使用 Uvicorn 啟動 FastAPI 伺服器：
 ```sh
-uvicorn main:app --reload
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+### 5. 查詢伺服器內網IP
+執行範例請求程式：
+```sh
+ifconfig | grep "inet " | grep -v 127.0.0.1 | awk '{print $2}' | head -n 1  # macOS/Linux
+ipconfig | findstr "IPv4" | for /F "tokens=14 delims= " %i in ('findstr "IPv4"') do @echo %i  # Windows
 ```
 
-### 5. 發送 API 請求
+### 6. 發送 API 請求
 執行範例請求程式：
 ```sh
 python request.py
